@@ -1,4 +1,5 @@
 #version 430 core
+// 深度剥离 pass：输出世界空间位置/法线与纹理坐标
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNor;
 layout(location = 2) in vec2 aTexCoord;
@@ -13,10 +14,7 @@ out vec2 textureCoord;
 
 void main() {
   textureCoord = aTexCoord;
-  // 裁剪空间坐标系 (clip space) 中 点的位置
-  gl_Position = projection * view * model * vec4(aPos, 1.0f);
-  // 世界坐标系 (world space) 中 点的位置
-  vertexPos = (model * vec4(aPos, 1.0f)).xyz;
-  // 世界坐标系 (world space) 中 点的法向
+  gl_Position = projection * view * model * vec4(aPos, 1.0);
+  vertexPos = vec3(model * vec4(aPos, 1.0));
   vertexNor = mat3(transpose(inverse(model))) * aNor;
 }

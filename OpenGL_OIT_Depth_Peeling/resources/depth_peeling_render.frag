@@ -1,67 +1,52 @@
 #version 430 core
-layout (location = 0) out vec4 FragColor;
+// 单层深度剥离：与上一层深度比较，通过则输出带光照与透明度的颜色
+layout(location = 0) out vec4 FragColor;
+
 in vec3 vertexPos;
 in vec3 vertexNor;
 in vec2 textureCoord;
 
 uniform vec3 cameraPos;
 uniform vec3 lightPos;
-uniform vec3 k;
+uniform vec3 k; // x=环境光, y=漫反射, z=高光
 
 uniform sampler2D texture_diffuse;
-
 uniform sampler2D texture_depth;
+uniform vec2 u_ScreenSize;
 
 void main() {
-	// Bit-exact comparison between FP32 z-buffer and fragment depth
-	// float frontDepth = texture(texture_depth, gl_FragCoord.xy).r;
-  vec2 uv = gl_FragCoord.xy / vec2(800, 600);
-	float frontDepth = texture(texture_depth, uv).r;
-  FragColor = vec4(frontDepth, frontDepth, frontDepth, 1.0);
-	if (gl_FragCoord.z <= frontDepth) {
-    // FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-		discard;
-	}else{
+  vec2 uv = gl_FragCoord.xy / u_ScreenSize;
+  float frontDepth = texture(texture_depth, uv).r;
 
-  vec3 lightColor = vec3(1.0f, 1.0f, 1.0f);
+  // 与上一层深度比较，更近的片段丢弃
+  if (gl_FragCoord.z <= frontDepth) {
+    discard;
+  }
 
-  // Ambient
-  // Ia = ka * La
-  float ambientStrenth = k[0];
-  vec3 ambient = ambientStrenth * lightColor;
+  vec3 lightColor = vec3(1.0);
 
-  // Diffuse
-  // Id = kd * max(0, normal dot light) * Ld
-  float diffuseStrenth = k[1];
+  float ambientStrength = k.x;
+  vec3 ambient = ambientStrength * lightColor;
+
+  float diffuseStrength = k.y;
   vec3 normalDir = normalize(vertexNor);
   vec3 lightDir = normalize(lightPos - vertexPos);
   vec3 diffuse =
-      diffuseStrenth * max(dot(normalDir, lightDir), 0.0) * lightColor;
+      diffuseStrength * max(dot(normalDir, lightDir), 0.0) * lightColor;
 
-  // Specular (Phong)
-  // Is = ks * (view dot reflect)^s * Ls
-
-  // float specularStrenth = k[2];
-  // vec3 viewDir = normalize(cameraPos - vertexPos);
-  // vec3 reflectDir = reflect(-lightDir, normalDir);
-  // vec3 specular = specularStrenth *
-  //                 pow(max(dot(viewDir, reflectDir), 0.0f), 2) * lightColor;
-
-  // Specular (Blinn-Phong)
-  // Is = ks * (normal dot halfway)^s Ls
-  float specularStrenth = k[2];
+  float specularStrength = k.z;
   vec3 viewDir = normalize(cameraPos - vertexPos);
   vec3 halfwayDir = normalize(lightDir + viewDir);
-  vec3 specular = specularStrenth *
-                  pow(max(dot(normalDir, halfwayDir), 0.0f), 2) * lightColor;
+  vec3 specular = specularStrength *
+                  pow(max(dot(normalDir, halfwayDir), 0.0), 2.0) * lightColor;
 
-  // Obejct color
-  vec3 objectColor = vec3(0.8, 0.8, 0.8);
+  vec3 objectColor = vec3(0.8);
   float alpha = 0.0;
-  if (textureCoord.x >= 0 && textureCoord.y >= 0) {
-    objectColor = texture(texture_diffuse, textureCoord).xyz;
-    alpha = texture(texture_diffuse, textureCoord).w;
+  if (textureCoord.x >= 0.0 && textureCoord.y >= 0.0) {
+    vec4 sampled = texture(texture_diffuse, textureCoord);
+    objectColor = sampled.rgb;
+    alpha = sampled.a;
   }
+
   FragColor = vec4((ambient + diffuse + specular) * objectColor, alpha);
-  }
 }

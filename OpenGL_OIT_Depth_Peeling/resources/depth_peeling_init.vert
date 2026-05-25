@@ -13,10 +13,7 @@ out vec2 textureCoord;
 
 void main() {
   textureCoord = aTexCoord;
-  // 裁剪空间坐标系 (clip space) 中 点的位置
-  gl_Position = projection * view * model * vec4(aPos, 1.0f);
-  // 世界坐标系 (world space) 中 点的位置
-  vertexPos = (model * vec4(aPos, 1.0f)).xyz;
-  // 世界坐标系 (world space) 中 点的法向
+  gl_Position = projection * view * model * vec4(aPos, 1.0);
+  vertexPos = vec3(model * vec4(aPos, 1.0));
   vertexNor = mat3(transpose(inverse(model))) * aNor;
 }

@@ -6,6 +6,6 @@ layout(location = 2) in vec2 aTexCoord;
 out vec2 textureCoord;
 
 void main() {
-    textureCoord = aTexCoord;
-    gl_Position = vec4(aPos, 1.0f);
+  textureCoord = aTexCoord;
+  gl_Position = vec4(aPos, 1.0);
 }
