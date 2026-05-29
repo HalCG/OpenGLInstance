@@ -1,105 +1,267 @@
-# 用 MSAA + 随机 Sample Mask 实现无序半透明渲染：Stochastic Transparency 实践笔记
+# 用 MSAA + 随机 Sample Mask 实现无序半透明渲染
 
-> **项目仓库**：`OpenGL_OIT_Stochastic_Transparency`  
-> **技术栈**：OpenGL 4.3、GLFW、GLAD、Assimp、GLM  
-> **关键词**：OIT、Order-Independent Transparency、Stochastic Transparency、MSAA、`gl_SampleMask`
+> **项目**：`OpenGL_OIT_Stochastic_Transparency`  
+> **关键词**：Stochastic Transparency、OIT、MSAA、`gl_SampleMask`、深度测试
 
 ---
 
 ## 摘要
 
-半透明物体若使用传统的 Alpha 混合，通常需要按深度从远到近排序，否则叠加结果会错误。当场景中存在大量交叉重叠的透明面时，排序成本高，且与延迟渲染、早期深度优化等管线设计相冲突。
+传统半透明需要按深度排序再 Alpha 混合。本文说明一种 **无需排序** 的近似做法：**Stochastic Transparency**——在 MSAA 的每个子采样上按纹理 Alpha「掷骰子」，用 `gl_SampleMask` 决定写入哪些子采样，再配合 **子采样级深度测试**，最后由硬件 **Resolve** 平均得到屏幕像素。
 
-本文记录一个基于 **Stochastic Transparency（随机透明度）** 思路的 OpenGL 教学 Demo：在 **16× MSAA** 下，片元着色器根据纹理 Alpha 对每个子采样做随机保留/丢弃，通过 `gl_SampleMask` 控制写入，再配合深度测试，在 **无需对透明物体排序** 的前提下，近似得到正确的叠加效果。
-
-演示场景包含一个 Spot 模型与红/绿/蓝三块半透明「窗户」平面，故意在空间上交叉摆放，可用键盘旋转相机观察效果。
+下文聚焦 **原理、关键着色器实现**，以及本项目中 `StochasticTransparencyApp::init()` 里五行 OpenGL 状态在 **何时、何阶段** 起作用。
 
 ---
 
-## 1. 为什么半透明这么麻烦？
+## 1. 背景：为什么需要 OIT？
 
-### 1.1 画家算法与 Alpha 混合
+**画家算法**：透明物体从远到近绘制，每片元做
 
-经典半透明渲染流程：
+$$C_{\text{final}} = C_{\text{src}} \cdot \alpha + C_{\text{dst}} \cdot (1 - \alpha)$$
 
-1. 绘制所有不透明物体（开启深度测试）。
-2. 将透明物体按与相机的距离 **从远到近排序**。
-3. 关闭深度写入（或仅测试），按顺序做 **Alpha 混合**：
+痛点：排序贵、无法处理循环重叠、与深度缓冲难协作。
 
-$$
-C_{\text{final}} = C_{\text{src}} \cdot \alpha + C_{\text{dst}} \cdot (1 - \alpha)
-$$
+**OIT（Order-Independent Transparency）** 不依赖绘制顺序。本项目采用 **Stochastic Transparency**：把 Alpha 当作「每个 MSAA 子采样被保留的概率」，而非混合权重。
 
-问题在于：
-
-- **排序本身昂贵**：对象多、三角面多、动态场景时要每帧排序。
-- **无法处理「循环重叠」**：A 透过 B，B 又透过 A 时，不存在全局正确排序。
-- **与深度缓冲的协作困难**：透明片元若随意写深度，会挡住本应先绘制的更远透明层。
-
-### 1.2 OIT：不排序还能画对？
-
-**Order-Independent Transparency（OIT，无序透明）** 指一类 **不依赖物体绘制顺序** 的透明渲染技术，常见代表包括：
-
-| 方法 | 思路 | 典型代价 |
-|------|------|----------|
-| Depth Peeling | 多 Pass 逐层剥离最近表面 | Pass 数 = 层数 |
-| Weighted Blended OIT | 单 Pass 加权近似混合 | 近似，有亮度偏差 |
-| Linked List OIT | 每像素链表存储所有片元 | 显存 + 原子操作 |
-| **Stochastic Transparency** | 用 MSAA 子采样 + 随机 mask 近似 | 噪声，受采样数限制 |
-
-本项目实现的是最后一类：**实现短、概念清晰，非常适合学习和写 Demo**。
+| 方法 | 排序 | 本项 |
+|------|------|------|
+| Alpha 混合 | 需要 | — |
+| Stochastic Transparency | **不需要** | **采用** |
 
 ---
 
-## 2. Stochastic Transparency 在做什么？
+## 2. 原理：子采样掷骰子
 
-核心思想来自 McGuire & Bavoil 等工作（如 HPG 2013 *Stochastic Transparency*）：**不要把 Alpha 当作「混合比例」，而当作「该子采样被保留的概率」**。
+核心思想（McGuire & Bavoil, HPG 2013）：**Alpha = coverage = 子采样保留概率**。
 
-### 2.1 直觉图示：子采样掷骰子
-# Stochastic Transparency（精简解读）
+### 2.1 三步直觉
 
-本文仅保留原理与关键实现，剔除工程与构建细节。目标：快速理解如何用 MSAA + `gl_SampleMask` 实现无需排序的近似透明混合，以及程序中哪些 GL 状态在何阶段起作用。
+**① 每个子采样掷骰子（片元着色器）**
 
-## 要点速览
-- 思路：把纹理 alpha 视为「每个 MSAA 子采样被保留的概率」，在片元着色器为每个子采样做一次伯努利试验（确定性伪随机），用 `gl_SampleMask` 标记要写入的子采样，借助子采样级深度测试与硬件 Resolve 得到最终像素颜色。无需对透明对象排序。
-- 依赖：MSAA（多子采样）、`gl_SampleMask`（片元控制写入）、子采样级深度测试、硬件 Resolve（平均子采样颜色）。
+```
+  coverage = 0.6（纹理 Alpha）示意 8 个子采样
 
-## 核心片元逻辑（伪代码）
+  子采样:    s0    s1    s2    s3    s4    s5    s6    s7
+  随机数 r:  0.23  0.71  0.45  0.88  0.12  0.55  0.39  0.94
+  r < 0.6?   ✓     ✗     ✓     ✗     ✓     ✓     ✓     ✗
+  gl_SampleMask: 1  0  1  0  1  1  1  0   → 约 60% 位为 1
+```
+
+**② 深度测试：同一子采样上，近的赢**
+
+```
+  子采样 s2：远片元 A 先写 → 近片元 B 后写
+  B 深度更近 → 在 s2 上覆盖 A（无需对物体排序）
+```
+
+**③ MSAA Resolve：对「亮着」的子采样求平均 → 近似半透明**
+
+```
+  [R][--][R][--][R][R][R][--]  →  Resolve  →  约 0.5×红色
+```
+
+### 2.2 一帧内数据流（与本项目对应）
+
+```
+  initWindow: GLFW_SAMPLES=16     → 创建多采样帧缓冲（前置条件）
+       ↓
+  init(): 五行 GL 状态            → 整段渲染过程的全局规则（见 §4）
+       ↓
+  beginFrame: glClear 颜色+深度   → 每帧清空 MSAA FBO
+       ↓
+  renderScene: 4 次 Draw（无序）  → 片元写 gl_SampleMask + 颜色
+       │                            深度测试/写入在固定管线阶段执行
+       ↓
+  SwapBuffers                     → MSAA Resolve → 显示器
+```
+
+---
+
+## 3. 关键实现：片元着色器
+
+`resources/quad.frag` 是算法核心：
 
 ```glsl
-vec4 color = texture(texture_diffuse, uv);
-float coverage = color.a; // alpha
-uint mask = 0u;
-for (int i = 0; i < sampleCnt; ++i) {
-  float r = hash(float(i), float(frameID));
-  if (r < coverage) mask |= (1u << i);
+vec4 color = texture(texture_diffuse, textureCoord);
+float coverage = color.w;
+
+uint randMask = 0u;
+for (int i = 0; i < sampleCnt; i++) {
+    vec2 seed = vec2(i, frameID);
+    float r = fract(sin(dot(seed, vec2(12.9898, 78.233))) * 43758.5453);
+    if (r < coverage)
+        randMask |= (1u << i);
 }
-gl_SampleMask[0] = int(mask);
+gl_SampleMask[0] = int(randMask);
 FragColor = color;
 ```
 
-说明：`sampleCnt` 通常取 `GL_MAX_SAMPLES`；`frameID` 用作种子以避免不同对象/帧重用相同随机图案。
+| 符号 | 来源 | 作用 |
+|------|------|------|
+| `coverage` | 纹理 Alpha | 伯努利试验成功概率 |
+| `sampleCnt` | CPU 传 `GL_MAX_SAMPLES` | 掷骰子次数 = MSAA 采样数 |
+| `frameID` | 每物体递增 `% 4` | 随机种子，避免重叠面 mask 完全相同 |
+| `gl_SampleMask` | 片元输出 | 位为 1 的子采样才允许写入颜色/深度 |
 
-## 为什么这能工作（简述）
-- 每个像素在 MSAA 下有 N 个子采样。对每个子采样独立决定是否由当前片元“占领”。
-- 若某子采样被保留并通过深度测试，则写入该 sample 的颜色与深度；更远片元在该 sample 上被挡住。最终 Resolve 对亮着的子采样平均，近似恢复 alpha 所期望的透明度。
+CPU 侧每帧对 Spot、蓝/绿/红窗各 `Draw` 一次，**不排序**；`beginFrame` 只清一次屏，物体之间 **不清深度**（`clearColorDepth = {false,false}`），深度在四次绘制间累积。
 
-## 在代码中传递了哪些参数（关键）
-- `sampleCnt`：片元循环的上限，通常由 CPU 从 `GL_MAX_SAMPLES` 读取并传给 shader。决定随机掷骰子的分辨率（采样数越多，近似越平滑）。
-- `frameID`：随机种子的一部分，每个物体绘制时递增（或与物体索引相关），用于避免重叠物体在相同帧使用完全相同的随机掩码，减少系统性条纹。
+---
 
-## `src/StochasticTransparencyApp.cpp` 中的五行 GL 状态（详述）
-代码位置：[src/StochasticTransparencyApp.cpp](src/StochasticTransparencyApp.cpp#L53-L57)
+## 4. 五行 GL 状态：在流程中何时、扮演什么角色
 
-- `glEnable(GL_MULTISAMPLE)`：启用 MSAA，多子采样是本方法的基础；没有多采样，就无法在子采样粒度上选择保留/丢弃。
-- `glEnable(GL_SAMPLE_MASK)`：允许片元着色器写入 `gl_SampleMask`。写入掩码只有在启用此状态时才会生效。
-- `glEnable(GL_DEPTH_TEST)`：开启深度测试。配合多采样时，深度测试会在子采样级别决定哪个片元赢得该 sample 的写入权。
-- `glDepthFunc(GL_LEQUAL)`：深度比较函数（<=）。深度测试在写入前进行，用于判定是否通过并写入颜色/深度。
-- `glDepthMask(GL_TRUE)`：允许写入深度缓冲（每个通过的 sample 会写入其深度）。在本 Demo 中这是必要选择：成功写入深度会阻止更远的片元在同一 sample 上写入，从而实现近处优先的局部遮挡语义。
+以下代码位于 `StochasticTransparencyApp::init()`，在 **首帧绘制之前调用一次**，之后 **每帧、每个片元** 的固定管线都受这些状态约束，直到被 `glDisable` 改掉（本项目不会关掉）。
 
-这些调用在初始化阶段设置全局行为，之后每帧的片元着色器通过写 `gl_SampleMask` 决定当次片元哪些 sample 可以写入，随后深度测试与深度写入按上述状态在 sample 级别执行。
+```cpp
+glEnable(GL_MULTISAMPLE);
+glEnable(GL_SAMPLE_MASK);
+glEnable(GL_DEPTH_TEST);
+glDepthFunc(GL_LEQUAL);
+glDepthMask(GL_TRUE);
+```
 
-## 设计权衡与建议（简短）
-- 噪声：采样数有限会出现颗粒；可用更多 MSAA、时间累积或 TAA 来平滑。
-- 精确度：为教学型近似法，若需精确混合请使用 Linked List OIT 或 Depth Peeling。
-- 兼容性：不同驱动对 per-sample shading 行为可能不同，必要时启用 `GL_SAMPLE_SHADING`（`glMinSampleShading(1.0f)`）。
+另有一处 **必须先于上述状态生效** 的配置（`initWindow`）：
+
+```cpp
+glfwWindowHint(GLFW_SAMPLES, 16);  // 创建 16× MSAA 默认帧缓冲
+```
+
+没有多采样缓冲，后面五行中的「子采样」概念不存在。下文按 **OpenGL 管线时间顺序** 说明每一项。
+
+### 4.1 总览：状态 × 管线阶段
+
+| 状态 / 配置 | 主要生效阶段 | 一句话 |
+|-------------|--------------|--------|
+| `GLFW_SAMPLES=16` | 上下文/ FBO 创建 | 提供 N 个子采样槽位 |
+| `GL_MULTISAMPLE` | 光栅化 → Resolve | 打开多采样路径 |
+| `GL_SAMPLE_MASK` | 片元后、写入前 | 允许片元用 mask 筛子采样 |
+| `GL_DEPTH_TEST` | 片元后、写入前 | 按深度决定能否写入某 sample |
+| `glDepthFunc(GL_LEQUAL)` | 深度测试瞬间 | 通过条件：新深度 ≤ 旧深度 |
+| `glDepthMask(GL_TRUE)` | 深度测试通过后 | 允许更新深度缓冲 |
+
+### 4.2 `glEnable(GL_MULTISAMPLE)` —— 多采样路径的总开关
+
+**何时设置**：`init()`，窗口已带 `GLFW_SAMPLES` 创建完毕之后。
+
+**在哪些阶段起作用**：
+
+1. **光栅化**：三角形覆盖一个像素时，不是只影响 1 个点，而是影响该像素的 **N 个子采样**（本项 N≤16）。
+2. **片元着色**：在 MSAA 模式下，片元与 **子采样** 关联（具体是否「每子采样跑一次片元」取决于驱动与是否开启 sample shading；本 Demo 未开 `GL_SAMPLE_SHADING`，但 mask/深度仍按子采样语义工作）。
+3. **写入**：颜色、深度写入 **多采样颜色/深度缓冲**（每个像素 N 份）。
+4. **`SwapBuffers`（Resolve）**：硬件把 N 个子采样 **平均** 成 1 个显示像素——Stochastic Transparency 的「混合」 largely 发生在这里。
+
+**若关闭**：退化为单采样，无法「按子采样保留/丢弃」，本算法失效。
+
+### 4.3 `glEnable(GL_SAMPLE_MASK)` —— 允许片元改写「写入资格」
+
+**何时设置**：`init()`，且必须在片元里写 `gl_SampleMask` **之前** 启用。
+
+**在哪些阶段起作用**：
+
+- 发生在 **片元着色器执行完毕之后、颜色/深度实际写入 framebuffer 之前** 的「样本遮罩」阶段。
+- 片元里 `gl_SampleMask[0] = randMask`：只有 mask 中为 1 的 bit，该子采样才 **允许** 接收本片元的 `FragColor` 和深度。
+- 与 `coverage` 掷骰子直接对应：**先** 用随机决定哪些 sample「有资格写」，**再** 对这些 sample 做深度测试。
+
+**若关闭**：`gl_SampleMask` 写入被忽略，所有子采样都会尝试写入 → 半透明变成「全不透明片元」，失去随机透明度。
+
+**依赖关系**：依赖 `GL_MULTISAMPLE`；单采样下无意义。
+
+### 4.4 `glEnable(GL_DEPTH_TEST)` —— 子采样上的前后关系
+
+**何时设置**：`init()`；每帧 `beginFrame` 里 **不清** 深度开关，只 `glClear(DEPTH)`。
+
+**在哪些阶段起作用**：
+
+- **每个片元、每个通过 Sample Mask 的子采样**，将该子采样上的片元深度与 **多采样深度缓冲** 中对应 sample 的已存深度比较。
+- 本 Demo 连续画 4 个物体：**同一子采样** 上，后绘制且更近的片元可以赢；远的被挡——这是在 **子采样粒度** 实现「谁在前」，从而 **无需对网格排序**。
+
+**与 Stochastic 的配合**：
+
+```
+  片元到达 → Sample Mask 筛 sample → 深度测试筛 sample → 通过的 sample 写颜色+深度
+```
+
+**若关闭**：所有片元都写入，远近错乱，重叠透明完全错误。
+
+### 4.5 `glDepthFunc(GL_LEQUAL)` —— 深度比较规则
+
+**何时设置**：`init()`，与 `GL_DEPTH_TEST` 同时生效。
+
+**在哪些阶段起作用**：仅在 **深度测试执行的那一瞬间**。
+
+- `GL_LEQUAL`：新片元深度 **≤** 缓冲中深度 → **通过**。
+- 相等深度可通过（对共面或同一几何重复绘制更宽容）。
+- 本 Demo 每帧从 `glClearDepth(1.0)` 开始，近处深度小，远处大。
+
+**角色**：定义「什么叫 nearer」。Stochastic 只决定 **哪些 sample 参与竞争**；**谁赢** 由深度测试决定。
+
+### 4.6 `glDepthMask(GL_TRUE)` —— 是否写入深度缓冲
+
+**何时设置**：`init()`。
+
+**在哪些阶段起作用**：深度测试 **通过之后** 的写入阶段。
+
+- `GL_TRUE`：通过的子采样 **更新** 多采样深度缓冲。
+- 之后同一子采样上 **更远** 的片元会因深度测试失败而无法写入颜色。
+
+**在本项目中的角色**：使「近处透明片元占住该 sample」在 **后续 Draw** 中仍成立（四物体共用同一深度缓冲、中间不清深度）。这是 **无序绘制** 仍能近似正确的前后关系的关键之一。
+
+**若改为 `GL_FALSE`**：只测不写，后续片元无法被挡住，多层透明叠加会乱（传统透明常在对透明 pass 关深度写，本算法路径不同）。
+
+### 4.7 单行代码在「一帧四物体」中的时间线
+
+```
+帧开始
+  glClear 颜色+深度                    ← 深度缓冲置远平面
+  ─────────────────────────────────────────────────────────
+  Draw Spot
+    片元: 掷骰子 → gl_SampleMask       ← GL_SAMPLE_MASK + 片元 shader
+          深度测试 LEQUAL              ← GL_DEPTH_TEST + glDepthFunc
+          通过则写色+写深              ← GL_MULTISAMPLE 缓冲 + glDepthMask TRUE
+  ─────────────────────────────────────────────────────────
+  Draw 蓝窗 (frameID+1, 新随机 mask)
+    同上；与 Spot 在重叠像素的同一 sample 上比深度
+  ─────────────────────────────────────────────────────────
+  Draw 绿窗、红窗 …
+  ─────────────────────────────────────────────────────────
+  SwapBuffers → MSAA Resolve           ← GL_MULTISAMPLE 解析到屏幕
+帧结束
+```
+
+### 4.8 五行与着色器分工（对照表）
+
+| 层次 | 谁负责 | 做什么 |
+|------|--------|--------|
+| 窗口 | `GLFW_SAMPLES` | 创建 N 子采样缓冲 |
+| 全局状态 | `GL_MULTISAMPLE` | 走多采样 + Resolve |
+| 全局状态 | `GL_SAMPLE_MASK` | 允许片元筛 sample |
+| 片元 shader | `gl_SampleMask = randMask` | 按 Alpha 随机保留 sample |
+| 全局状态 | `GL_DEPTH_TEST` + `LEQUAL` | 近的赢 |
+| 全局状态 | `glDepthMask(TRUE)` | 赢的 sample 写下深度，挡住远的 |
+| 硬件 | Resolve | 子采样平均 ≈ 透明感 |
+
+---
+
+## 5. 设计取舍（简短）
+
+- **噪声**：采样数有限（16）会有颗粒；可时间累积或 TAA。
+- **近似**：非物理精确混合；要精确需 Linked List / Depth Peeling。
+- **Per-sample shading**：未显式 `glMinSampleShading(1.0)`，极端情况下驱动行为需实机验证。
+
+---
+
+## 6. 总结
+
+| 问题 | 答案 |
+|------|------|
+| 原理是什么？ | Alpha = 子采样保留概率；mask + 深度 + Resolve |
+| 关键代码在哪？ | `quad.frag` 中 `gl_SampleMask` 循环 |
+| 五行 GL 状态何时设？ | `init()` 一次，作用于之后每帧整条管线 |
+| 各自管什么？ | MSAA 提供 sample；MASK 筛 sample；深度测/写决定远近 |
+| 为何能不排序？ | 前后关系在 **每个子采样** 上由深度解决，透明度由 **随机 mask + Resolve 平均** 近似 |
+
+---
+
+## 参考
+
+- McGuire & Bavoil, *Stochastic Transparency*, HPG 2013  
+- 本项目：`src/StochasticTransparencyApp.cpp`（init 53–57 行）、`resources/quad.frag`
