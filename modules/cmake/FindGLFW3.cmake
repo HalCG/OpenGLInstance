@@ -15,7 +15,8 @@ endif()
 
 set(GLFW3_INCLUDE_DIR "${_GLFW_ROOT}/include")
 
-# 按 MSVC 工具集选择 lib-vc20xx 目录
+# 按编译器选择预编译库目录
+# Clang on Windows (x86_64-pc-windows-msvc) 链接 MSVC 版 glfw3.lib
 if(MSVC)
     if(MSVC_VERSION GREATER_EQUAL 1930)
         set(_GLFW_LIB_DIR "${_GLFW_ROOT}/lib-vc2022")
@@ -28,6 +29,8 @@ if(MSVC)
     else()
         set(_GLFW_LIB_DIR "${_GLFW_ROOT}/lib-vc2013")
     endif()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND WIN32)
+    set(_GLFW_LIB_DIR "${_GLFW_ROOT}/lib-vc2022")
 elseif(MINGW)
     set(_GLFW_LIB_DIR "${_GLFW_ROOT}/lib-mingw-w64")
 endif()
