@@ -35,6 +35,7 @@ void DepthPeelingApp::processInput(GLFWwindow *window) {
 
 bool DepthPeelingApp::init() {
   s_instance_ = this;
+
   if (!initWindow()) {
     return false;
   }
@@ -55,7 +56,11 @@ bool DepthPeelingApp::init() {
 }
 
 bool DepthPeelingApp::initWindow() {
-  glfwInit();
+  if (!glfwInit()) {
+    std::cout << "Failed to initialize GLFW" << std::endl;
+    return false;
+  }
+
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -75,6 +80,9 @@ bool DepthPeelingApp::initWindow() {
 
   if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
     std::cout << "Failed to initialize GLAD" << std::endl;
+    glfwDestroyWindow(window_);
+    window_ = nullptr;
+    glfwTerminate();
     return false;
   }
 
@@ -108,17 +116,12 @@ bool DepthPeelingApp::initShaders() {
 
 bool DepthPeelingApp::initScene() {
   const std::string root = AppConfig::kResourceRoot;
-  modelQuad_ =
-      std::make_unique<Model>(root + "models/quad/quad.obj");
-  modelSpot_ =
-      std::make_unique<Model>(root + "models/spot/spot.obj");
+  modelQuad_ = std::make_unique<Model>(root + "models/quad/quad.obj");
+  modelSpot_ = std::make_unique<Model>(root + "models/spot/spot.obj");
 
-  texWindowR_ =
-      std::make_unique<Texture>(root + "models/quad/window-r.png");
-  texWindowG_ =
-      std::make_unique<Texture>(root + "models/quad/window-g.png");
-  texWindowB_ =
-      std::make_unique<Texture>(root + "models/quad/window-b.png");
+  texWindowR_ = std::make_unique<Texture>(root + "models/quad/window-r.png");
+  texWindowG_ = std::make_unique<Texture>(root + "models/quad/window-g.png");
+  texWindowB_ = std::make_unique<Texture>(root + "models/quad/window-b.png");
   texSpot_ = std::make_unique<Texture>(root + "models/spot/spot.png");
   return true;
 }
@@ -149,6 +152,10 @@ bool DepthPeelingApp::initFramebuffers() {
 }
 
 void DepthPeelingApp::run() {
+  if (!window_) {
+    return;
+  }
+
   while (!glfwWindowShouldClose(window_)) {
     beginFrame();
     initPeelBuffers();

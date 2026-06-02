@@ -16,35 +16,36 @@ public:
   // ------------------------------------------------------------------------
   Shader(const char *vertexPath, const char *fragmentPath,
          std::string geometryPath = "") {
-    // 1. retrieve the vertex/fragment source code from filePath
     std::string vertexCode;
     std::string fragmentCode;
     std::string geometryCode;
 
-    std::ifstream vShaderFile;
-    std::ifstream fShaderFile;
-    std::ifstream gShaderFile;
+    auto readFile = [](const char *path, std::string &out) -> bool {
+      std::ifstream file(path, std::ios::in | std::ios::binary);
+      if (!file.is_open()) {
+        std::cout << "ERROR::SHADER::FILE_NOT_FOUND: " << path << std::endl;
+        return false;
+      }
+      std::stringstream buffer;
+      buffer << file.rdbuf();
+      out = buffer.str();
+      if (out.empty()) {
+        std::cout << "ERROR::SHADER::FILE_EMPTY: " << path << std::endl;
+        return false;
+      }
+      return true;
+    };
 
-    // ensure ifstream objects can throw exceptions:
-    vShaderFile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-    fShaderFile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-    try {
-      // open files
-      vShaderFile.open(vertexPath);
-      fShaderFile.open(fragmentPath);
-      std::stringstream vShaderStream, fShaderStream;
-      // read file's buffer contents into streams
-      vShaderStream << vShaderFile.rdbuf();
-      fShaderStream << fShaderFile.rdbuf();
-      // close file handlers
-      vShaderFile.close();
-      fShaderFile.close();
-      // convert stream into string
-      vertexCode = vShaderStream.str();
-      fragmentCode = fShaderStream.str();
-    } catch (std::ifstream::failure &e) {
-      std::cout << "ERROR::SHADER::FILE_NOT_SUCCESSFULLY_READ: " << e.what()
-                << std::endl;
+    const bool vertexOk = readFile(vertexPath, vertexCode);
+    const bool fragmentOk = readFile(fragmentPath, fragmentCode);
+    bool geometryOk = true;
+    if (!geometryPath.empty()) {
+      geometryOk = readFile(geometryPath.c_str(), geometryCode);
+    }
+
+    if (!vertexOk || !fragmentOk || !geometryOk) {
+      ID = 0;
+      return;
     }
 
     const char *vShaderCode = vertexCode.c_str();
@@ -67,17 +68,6 @@ public:
     glAttachShader(ID, fragment);
 
     if (!geometryPath.empty()) {
-      // open files
-      gShaderFile.open(geometryPath);
-      std::stringstream gShaderStream;
-      // read file's buffer contents into streams
-      gShaderStream << gShaderFile.rdbuf();
-
-      // close file handlers
-      gShaderFile.close();
-      // convert stream into string
-      geometryCode = gShaderStream.str();
-
       const char *gShaderCode = geometryCode.c_str();
 
       // geometry shader
@@ -101,7 +91,11 @@ public:
   }
   // activate the shader
   // ------------------------------------------------------------------------
-  void use() const { glUseProgram(ID); }
+  void use() const {
+    if (ID != 0) {
+      glUseProgram(ID);
+    }
+  }
   // utility uniform functions
   // ------------------------------------------------------------------------
   void setBool(const std::string &name, bool value) const {
