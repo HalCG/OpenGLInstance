@@ -222,8 +222,11 @@ bool LinkedListOITApp::initFramebuffers() {
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, opaqueTexture_, 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, opaqueDepthTexture_, 0);
 
-    GLenum drawBuffers[] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT};
-    glDrawBuffers(2, drawBuffers);
+    // GLenum drawBuffers[] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT};
+    // glDrawBuffers(2, drawBuffers);
+
+    GLenum drawBuffers[] = {GL_COLOR_ATTACHMENT0};
+    glDrawBuffers(1, drawBuffers);
 
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         std::cout << "ERROR::FRAMEBUFFER:: Opaque framebuffer is not complete!" << std::endl;
@@ -246,8 +249,11 @@ bool LinkedListOITApp::initFramebuffers() {
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, oitTexture_, 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, opaqueDepthTexture_, 0);
 
-    GLenum drawBuffersOIT[] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT};
-    glDrawBuffers(2, drawBuffersOIT);
+    // GLenum drawBuffersOIT[] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT};
+    // glDrawBuffers(2, drawBuffersOIT);
+
+    GLenum drawBuffersOIT[] = {GL_COLOR_ATTACHMENT0};
+    glDrawBuffers(1, drawBuffersOIT);
 
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         std::cout << "ERROR::FRAMEBUFFER:: OIT framebuffer is not complete!" << std::endl;
