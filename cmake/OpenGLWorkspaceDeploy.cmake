@@ -1,11 +1,19 @@
 # Post-build: copy per-project resources and runtime DLLs next to the executable.
 
 function(ogl_ws_deploy_runtime target_name resource_subdir)
-    set(_resource_src "${OGL_WS_RESOURCES_DIR}/${resource_subdir}")
+    # Prefer per-project resources/ next to the calling CMakeLists.txt.
+    set(_project_resources "${CMAKE_CURRENT_LIST_DIR}/resources")
+    if(IS_DIRECTORY "${_project_resources}")
+        set(_resource_src "${_project_resources}")
+        set(_resource_label "${target_name}")
+    else()
+        set(_resource_src "${OGL_WS_RESOURCES_DIR}/${resource_subdir}")
+        set(_resource_label "${resource_subdir}")
+    endif()
     if(NOT IS_DIRECTORY "${_resource_src}")
         message(FATAL_ERROR
             "Resource directory not found: ${_resource_src}\n"
-            "Expected layout: resources/${resource_subdir}/..."
+            "Expected layout: <project>/resources/ or resources/${resource_subdir}/..."
         )
     endif()
 
@@ -19,7 +27,7 @@ function(ogl_ws_deploy_runtime target_name resource_subdir)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${_resource_src}"
             "$<TARGET_FILE_DIR:${target_name}>/resources"
-        COMMENT "Copy resources/${resource_subdir} next to ${target_name}"
+        COMMENT "Copy resources (${_resource_label}) next to ${target_name}"
     )
 
     if(NOT WIN32)
