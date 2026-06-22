@@ -18,6 +18,24 @@
             "cwd": "${command:cmake.launchTargetDirectory}",
             "preLaunchTask": "Build: Clang Debug (Depth Peeling)",
             "terminal": "integrated"
+        },
+        {
+            "name": "LLDB: Rendering Paths Demo",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/out/build/x64-clang-debug/OpenGL_Rendering_Paths/OpenGL_Rendering_Paths.exe",
+            "cwd": "${workspaceFolder}/out/build/x64-clang-debug/OpenGL_Rendering_Paths",
+            "preLaunchTask": "Build: Clang Debug (Rendering Paths)",
+            "terminal": "integrated"
+        },
+        {
+            "name": "LLDB: Anti-Aliasing Demo",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/out/build/x64-clang-debug/OpenGL_Anti_Aliasing/OpenGL_Anti_Aliasing.exe",
+            "cwd": "${workspaceFolder}/out/build/x64-clang-debug/OpenGL_Anti_Aliasing",
+            "preLaunchTask": "Build: Clang Debug (Anti-Aliasing)",
+            "terminal": "integrated"
         }
     ]
 }

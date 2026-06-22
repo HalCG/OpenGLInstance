@@ -63,6 +63,54 @@
             },
             "group": "build",
             "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build: Clang Debug (Rendering Paths)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/out/build/x64-clang-debug",
+                "--target",
+                "OpenGL_Rendering_Paths"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build: Clang Debug (Anti-Aliasing)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/out/build/x64-clang-debug",
+                "--target",
+                "OpenGL_Anti_Aliasing"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build: Clang Debug (PBR)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/out/build/x64-clang-debug",
+                "--target",
+                "OpenGL_PBR"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": "$gcc"
         }
     ]
 }

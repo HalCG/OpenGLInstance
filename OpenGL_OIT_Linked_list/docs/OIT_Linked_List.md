@@ -1,7 +1,7 @@
 # OIT Linked List 项目问答复习笔记
 
 > 本文档整理自对 `OpenGL_OIT_Linked_list` 项目的学习问答，便于后续复习与查阅。  
-> 对应源码：`LinkedListOITApp.cpp`、`resources/OpenGL_OIT_Linked_list/*.frag`
+> 对应源码：`LinkedListOITApp.cpp`、`OpenGL_OIT_Linked_list/resources/*.frag`
 
 ---
 
